@@ -258,7 +258,9 @@ class PluginManager
             }
 
             $installPath = $this->getInstallPath($autoloadPackage, $globalRepo && $globalRepo->hasPackage($autoloadPackage));
-            if ($installPath === null) {
+            // skip packages not present on disk, e.g. root dependencies not installed yet, or installed elsewhere
+            // by a custom installer which is not registered yet so the path above points to the default location
+            if ($installPath === null || !file_exists($installPath)) {
                 continue;
             }
             // call shouldAutoloadPackage first here to ensure the plugin package gets marked in the autoloadedPackages array

@@ -18,11 +18,13 @@ use Composer\Installer\PluginInstaller;
 use Composer\Json\JsonFile;
 use Composer\Package\CompleteAliasPackage;
 use Composer\Package\CompletePackage;
+use Composer\Package\Link;
 use Composer\Package\Loader\JsonLoader;
 use Composer\Package\Loader\ArrayLoader;
 use Composer\Package\Locker;
 use Composer\Package\RootPackage;
 use Composer\Plugin\PluginManager;
+use Composer\Semver\Constraint\MatchAllConstraint;
 use Composer\IO\BufferIO;
 use Composer\EventDispatcher\EventDispatcher;
 use Composer\Autoload\AutoloadGenerator;
@@ -187,6 +189,35 @@ class PluginInstallerTest extends TestCase
             $this->io->getOutput()
         );
         self::assertEquals('installer-v1', $plugins[0]->version);  // @phpstan-ignore property.notFound
+    }
+
+    public function testInstallPluginRequiringRootPackageSkipsRootDependenciesMissingFromDisk(): void
+    {
+        // e.g. a package installed outside vendor/ by a custom installer which is not registered yet
+        $missingPackage = new CompletePackage('dummy/missing', '1.0.0.0', '1.0.0');
+        $missingPackage->setAutoload(['classmap' => ['missing.php']]);
+        $this->repository
+            ->expects($this->any())
+            ->method('getPackages')
+            ->will($this->returnValue([$missingPackage]));
+
+        $this->composer->getPackage()->setRequires([
+            'dummy/missing' => new Link('dummy/root', 'dummy/missing', new MatchAllConstraint(), Link::TYPE_REQUIRE),
+        ]);
+        $plugin = $this->packages[0];
+        self::assertInstanceOf(CompletePackage::class, $plugin);
+        $plugin->setRequires(array_merge($plugin->getRequires(), [
+            'dummy/root' => new Link('plugin-v1', 'dummy/root', new MatchAllConstraint(), Link::TYPE_REQUIRE),
+        ]));
+
+        $dispatcher = $this->getMockBuilder('Composer\EventDispatcher\EventDispatcher')->disableOriginalConstructor()->getMock();
+        $this->composer->setAutoloadGenerator(new AutoloadGenerator($dispatcher, $this->io));
+
+        $installer = new PluginInstaller($this->io, $this->composer);
+        $this->pm->loadInstalledPlugins();
+        $installer->install($this->repository, $plugin);
+
+        self::assertEquals('activate v1'.PHP_EOL, $this->io->getOutput());
     }
 
     public function testInstallMultiplePlugins(): void
